@@ -1,0 +1,23 @@
+{
+  "name": "wooricard-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "우리카드 법인카드 자동 수집 + Slack/Sheet 알림 (standalone)",
+  "main": "wooricard-main.js",
+  "scripts": {
+    "start": "node wooricard-main.js",
+    "test": "node wooricard-main.js --no-slack --dry-run",
+    "daemon": "node daemon.js",
+    "daemon:now": "node daemon.js --run-now"
+  },
+  "dependencies": {
+    "@slack/web-api": "^7.3.4",
+    "exceljs": "^4.4.0",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^8.0.5",
+    "puppeteer": "^22.15.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

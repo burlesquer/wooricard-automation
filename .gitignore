@@ -1,0 +1,9 @@
+node_modules/
+config.json
+state/
+captures/
+*.log
+.omc/
+.idea/
+.DS_Store
+*.bak

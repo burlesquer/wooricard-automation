@@ -1,0 +1,32 @@
+{
+  "slackBotToken": "xoxb-your-slack-bot-token-here",
+  "gmail": {
+    "user": "your-gmail@gmail.com",
+    "password": "xxxx xxxx xxxx xxxx"
+  },
+  "monthlyCredit": 300000,
+  "urls": {
+    "login": "https://pc.wooricard.com/dcpc/yh2/bp/bmm/bmm01/H2BMM201S01.do",
+    "history": "https://pc.wooricard.com/dcpc/yh2/bp/bcv/bcv04/apvhisinq/H2BCV204S01.do"
+  },
+  "xlsx": {
+    "path": "./복리후생비.xlsx",
+    "columns": {
+      "prevBalance":      "H",
+      "availableAmount":  "I",
+      "usage":            "J",
+      "remainingBalance": "K"
+    }
+  },
+  "accounts": [
+    {
+      "name": "홍길동",
+      "id": "hongid",
+      "pw": "YOUR_PASSWORD_HERE",
+      "sheetRow": 8,
+      "cardSuffix": "1234",
+      "slackId": "U0000000000",
+      "email": "person@example.com"
+    }
+  ]
+}
