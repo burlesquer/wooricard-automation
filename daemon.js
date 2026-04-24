@@ -7,7 +7,7 @@ const TZ = 'Asia/Seoul';
 const MAIN_SCRIPT = path.join(__dirname, 'wooricard-main.js');
 const HOURLY_SCHEDULE = process.env.DAEMON_HOURLY_SCHEDULE || '59 * * * *'; // every hour at :59
 const BRIEFING_SCHEDULE = process.env.DAEMON_BRIEFING_SCHEDULE || '0 9 * * *'; // 09:00 daily
-const SHEET_CREATE_SCHEDULE = '1 0 1 * *'; // 00:01 on 1st of every month
+const SHEET_CREATE_SCHEDULE = '20 0 1 * *'; // 00:20 on 1st of every month (넉넉한 버퍼)
 const BRIEFING_HOUR = 9;
 
 const config = require('./config.json');
@@ -118,9 +118,9 @@ cron.schedule(BRIEFING_SCHEDULE, async () => {
   }, { queue: true });
 }, { timezone: TZ });
 
-// Monthly xlsx sheet creation at 00:01 on 1st
-// queue:true → 4/30 23:59 hourly가 5/1 00:01까지 spill 해도 끝날 때까지 대기.
-// xlsx 동시 쓰기 EBUSY 충돌 방지.
+// Monthly xlsx sheet creation at 00:20 on 1st
+// 00:20 = 23:59 hourly (~3분) 종료 후 18분 버퍼. 충돌 거의 불가능.
+// queue:true 는 만일에 대비한 안전망 (정상 케이스에서는 mutex 비어있음).
 cron.schedule(SHEET_CREATE_SCHEDULE, async () => {
   await withMutex(async () => {
     const now = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
