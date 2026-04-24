@@ -140,11 +140,19 @@ npm run daemon:now         # 시작 즉시 1회 실행 후 상시 대기
 
 ## 자동 스케줄 (daemon)
 
-| cron | 시각 | 동작 |
-|---|---|---|
-| `59 * * * *` | 매시간 :59 (9시대/1일 00시대 skip) | hourly — 변동 감지, 조용한 run 기본 |
-| `0 9 * * *` | 매일 09:00 | briefing + (1일엔 monthly-capture 선행) |
-| `1 0 1 * *` | 매월 1일 00:01 | 새 xlsx 시트 자동 생성 |
+| cron | 시각 | 동작 | mutex |
+|---|---|---|---|
+| `59 * * * *` | 매시간 :59 (8시대 / 9시대 / 1일 0시대 skip) | hourly — 변동 감지, 조용한 run 기본 | skip 모드 |
+| `0 9 * * *` | 매일 09:00 | briefing + (1일엔 monthly-capture 선행) | **queue 모드** |
+| `20 0 1 * *` | 매월 1일 00:20 | 새 xlsx 시트 자동 생성 (23:59 hourly 종료 후 18분 버퍼) | **queue 모드** |
+
+### 충돌 방지 설계
+
+3중 보호로 cron 간 충돌 차단:
+
+1. **시간대 skip**: hourly 가 8시대(briefing 충돌)/9시대(briefing 담당)/1일 0시대(sheet-create 담당) 자동 회피
+2. **단일 mutex**: 모든 cron 이 `running` 플래그 공유 — 동시 실행 절대 불가
+3. **queue 모드**: briefing/sheet-create 는 hourly 가 mutex 잡고 있어도 풀릴 때까지 최대 10분 대기 (skip 안 함)
 
 ### 환경변수 오버라이드
 
@@ -224,6 +232,9 @@ Subject: [우리카드 법인] 박성준 04.17 능이감자탕 40,000원
 | `No archive ... no xlsx data` | state 지웠는데 xlsx 도 없을 때 발생 — xlsx H열 수식 확인 |
 | Gmail 전송 실패 | 2FA + 앱 비밀번호 확인. 일반 비밀번호 X |
 | 새 월 시트 생성 안 됨 | daemon 실행 중인지 확인. 또는 수동 `createMonthSheet` 호출 |
+| 09:00 briefing DM 안 옴 | daemon 이 09:00 에 살아있었는지 확인. PC 절전 모드 OFF 권장. PM2 도입 권장 |
+| 로그에 `Previous run still in progress — skipping` | hourly tick 이 길어져 다른 cron 충돌. 8시대 skip + queue 로 이미 방어됨 |
+| Daemon 죽었는데 자동 재시작 원함 | PM2: `pm2 start daemon.js --name wooricard && pm2 save && pm2-startup install` |
 
 ## License
 
