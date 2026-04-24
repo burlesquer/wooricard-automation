@@ -51,10 +51,24 @@ function spawnMain({ mode }) {
   });
 }
 
-async function withMutex(fn) {
+// queue:true → wait until mutex frees, then run (max 10 min wait)
+// queue:false (default) → skip if mutex busy
+async function withMutex(fn, { queue = false, maxWaitMs = 10 * 60 * 1000 } = {}) {
   if (running) {
-    console.log(`[${nowKst()}] ⏸ Previous run still in progress — skipping`);
-    return;
+    if (!queue) {
+      console.log(`[${nowKst()}] ⏸ Previous run still in progress — skipping`);
+      return;
+    }
+    console.log(`[${nowKst()}] ⏳ Previous run in progress — queued (wait up to ${maxWaitMs / 1000}s)`);
+    const t0 = Date.now();
+    while (running && Date.now() - t0 < maxWaitMs) {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    if (running) {
+      console.log(`[${nowKst()}] ❌ Wait timeout — abandoning queued task`);
+      return;
+    }
+    console.log(`[${nowKst()}] ▶ Queued task starting after ${(Date.now() - t0) / 1000}s wait`);
   }
   running = true;
   try { await fn(); } finally { running = false; }
@@ -71,11 +85,18 @@ console.log(`Concurrency:      mutex — overlapping ticks are skipped`);
 console.log('Press Ctrl+C to stop.');
 console.log('========================================\n');
 
-// Hourly tick — skips 9시대 (briefing cron 담당) + 1일 0시대 (sheet-create cron 담당)
+// Hourly tick — skips:
+//   - 9시대 (briefing cron 담당)
+//   - 8시대 (briefing 시각 침범 방지: 8:59 hourly가 9:01까지 spill하면 9:00 briefing 충돌)
+//   - 1일 0시대 (sheet-create cron 담당)
 cron.schedule(HOURLY_SCHEDULE, async () => {
   const { hour, day } = kstParts();
   if (hour === BRIEFING_HOUR) {
     console.log(`[${nowKst()}] ⏭️  ${BRIEFING_HOUR}시대 — briefing cron 이 담당, skip`);
+    return;
+  }
+  if (hour === BRIEFING_HOUR - 1) {
+    console.log(`[${nowKst()}] ⏭️  ${BRIEFING_HOUR - 1}시대 — briefing 충돌 방지, skip`);
     return;
   }
   if (day === 1 && hour === 0) {
@@ -85,7 +106,8 @@ cron.schedule(HOURLY_SCHEDULE, async () => {
   await withMutex(() => spawnMain({ mode: 'hourly' }));
 }, { timezone: TZ });
 
-// Daily briefing at 09:00 — on 1st of month, also runs monthly-capture first
+// Daily briefing at 09:00 — on 1st of month, also runs monthly-capture first.
+// queue:true → 만일 다른 tick이 mutex 잡고 있어도 끝날 때까지 대기 후 발화.
 cron.schedule(BRIEFING_SCHEDULE, async () => {
   await withMutex(async () => {
     const { day } = kstParts();
@@ -93,22 +115,26 @@ cron.schedule(BRIEFING_SCHEDULE, async () => {
       await spawnMain({ mode: 'monthly-capture' });
     }
     await spawnMain({ mode: 'briefing' });
-  });
+  }, { queue: true });
 }, { timezone: TZ });
 
 // Monthly xlsx sheet creation at 00:01 on 1st
+// queue:true → 4/30 23:59 hourly가 5/1 00:01까지 spill 해도 끝날 때까지 대기.
+// xlsx 동시 쓰기 EBUSY 충돌 방지.
 cron.schedule(SHEET_CREATE_SCHEDULE, async () => {
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
-  const y = now.getFullYear();
-  const m = ('0' + (now.getMonth() + 1)).slice(-2);
-  const newYM = `${y}-${m}`;
-  console.log(`\n[${nowKst()}] 📅 Monthly sheet creation triggered for ${newYM}`);
-  try {
-    const res = await xlsxStore.createMonthSheet(newYM);
-    console.log(`[${nowKst()}] ${res ? '✅' : '❌'} createMonthSheet(${newYM}) = ${res}`);
-  } catch (e) {
-    console.error(`[${nowKst()}] Sheet creation error:`, e.message);
-  }
+  await withMutex(async () => {
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
+    const y = now.getFullYear();
+    const m = ('0' + (now.getMonth() + 1)).slice(-2);
+    const newYM = `${y}-${m}`;
+    console.log(`\n[${nowKst()}] 📅 Monthly sheet creation triggered for ${newYM}`);
+    try {
+      const res = await xlsxStore.createMonthSheet(newYM);
+      console.log(`[${nowKst()}] ${res ? '✅' : '❌'} createMonthSheet(${newYM}) = ${res}`);
+    } catch (e) {
+      console.error(`[${nowKst()}] Sheet creation error:`, e.message);
+    }
+  }, { queue: true });
 }, { timezone: TZ });
 
 if (process.argv.includes('--run-now')) {
