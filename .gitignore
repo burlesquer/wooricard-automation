@@ -3,6 +3,7 @@ config.json
 state/
 captures/
 *.log
+복리후생비.xlsx
 .omc/
 .idea/
 .DS_Store
