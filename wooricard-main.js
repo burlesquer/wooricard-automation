@@ -38,6 +38,7 @@ const cliArgs = process.argv.slice(2);
 const CLI_MONTH = (() => { const i = cliArgs.indexOf('--month'); return i >= 0 ? cliArgs[i + 1] : null; })();
 const CLI_ACCOUNT = (() => { const i = cliArgs.indexOf('--account'); return i >= 0 ? cliArgs[i + 1] : null; })();
 const CLI_DRY_RUN = cliArgs.includes('--dry-run') || cliArgs.includes('--no-sheet'); // --no-sheet retained as alias
+const CLI_NO_XLSX = cliArgs.includes('--no-xlsx');
 const CLI_NO_SLACK = cliArgs.includes('--no-slack');
 const CLI_NO_GMAIL = cliArgs.includes('--no-gmail');
 const CLI_HEADFUL = cliArgs.includes('--headful');
@@ -276,7 +277,9 @@ async function main() {
         });
 
         // Write usage (J column) to xlsx
-        if (account.sheetRow) {
+        if (CLI_NO_XLSX) {
+          console.error(`  (xlsx write skipped — --no-xlsx)`);
+        } else if (account.sheetRow) {
           const ok = await xlsxStore.writeUsage(account.sheetRow, yearMonth, parsed.totalAmount);
           console.error(`  xlsx J${account.sheetRow} ← ${parsed.totalAmount.toLocaleString()}원 (${ok ? 'OK' : 'FAIL'})`);
         } else {
