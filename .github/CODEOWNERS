@@ -1,0 +1,7 @@
+# CODEOWNERS — main 브랜치 보호용
+# branch protection rule 에서 "Require review from Code Owners" 활성화 시
+# 이 파일에 명시된 owner 의 승인이 필수.
+#
+# 단일 contributor 프로젝트이므로 burlesquer 가 모든 파일의 owner.
+
+* @burlesquer

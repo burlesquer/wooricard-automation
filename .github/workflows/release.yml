@@ -1,0 +1,67 @@
+name: Release on main push
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip release]')"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version (date-based)
+        id: ver
+        run: |
+          TODAY=$(date +%Y.%m.%d)
+          # 오늘 날짜로 push 된 카운트 = N (당일 N번째 release)
+          PREV=$(git tag -l "v${TODAY}-*" | sort -V | tail -1)
+          if [ -z "$PREV" ]; then
+            N=1
+          else
+            N=$(echo "$PREV" | sed -E "s/v${TODAY}-//")
+            N=$((N + 1))
+          fi
+          NEW_TAG="v${TODAY}-$(printf '%03d' $N)"
+          echo "new_tag=${NEW_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Computed tag: ${NEW_TAG}"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          PREV_TAG=$(git tag --sort=-creatordate | head -1 || true)
+          {
+            echo "notes<<EOF_NOTES"
+            if [ -z "$PREV_TAG" ]; then
+              echo "Initial release"
+              git log --pretty=format:"- %s (%h)" -n 50
+            else
+              echo "## Changes since ${PREV_TAG}"
+              echo ""
+              git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD"
+            fi
+            echo ""
+            echo "EOF_NOTES"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.ver.outputs.new_tag }}"
+          git push origin "${{ steps.ver.outputs.new_tag }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.ver.outputs.new_tag }}" \
+            --title "${{ steps.ver.outputs.new_tag }}" \
+            --notes "${{ steps.notes.outputs.notes }}"

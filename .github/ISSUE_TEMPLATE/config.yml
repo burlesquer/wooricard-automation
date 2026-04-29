@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Contributing Guide
+    url: https://github.com/burlesquer/wooricard-automation/blob/main/CONTRIBUTING.md
+    about: 워크플로우 / 브랜치 전략 / 커밋 규칙 먼저 읽어보세요

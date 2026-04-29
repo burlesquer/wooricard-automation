@@ -1,0 +1,67 @@
+name: Auto-create branch from issue
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  create-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev (fallback main)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute branch name
+        id: branch
+        run: |
+          TITLE='${{ github.event.issue.title }}'
+          NUM='${{ github.event.issue.number }}'
+          # type: feat/fix/chore/docs/refactor/test/perf/ci 중 prefix 추출
+          TYPE=$(echo "$TITLE" | grep -oE "^(feat|fix|chore|docs|refactor|test|perf|ci):" | tr -d ':' || true)
+          if [ -z "$TYPE" ]; then TYPE="chore"; fi
+          # slug: title 에서 prefix 제거 → 소문자 → 영숫자만 → max 30자
+          SLUG=$(echo "$TITLE" \
+            | sed -E 's/^[a-z]+://' \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9]+/-/g' \
+            | sed -E 's/^-+|-+$//g' \
+            | cut -c1-30)
+          BRANCH="${TYPE}/${NUM}-${SLUG}"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "Computed branch: ${BRANCH}"
+
+      - name: Determine base branch (dev or main)
+        id: base
+        run: |
+          if git ls-remote --heads origin dev | grep -q dev; then
+            echo "base=dev" >> "$GITHUB_OUTPUT"
+          else
+            echo "base=main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create branch from base
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin ${{ steps.base.outputs.base }}
+          git checkout -b "${{ steps.branch.outputs.branch }}" "origin/${{ steps.base.outputs.base }}"
+          git push origin "${{ steps.branch.outputs.branch }}"
+
+      - name: Comment on issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = '${{ steps.branch.outputs.branch }}';
+            const base = '${{ steps.base.outputs.base }}';
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🌿 Auto-created branch: \`${branch}\` (from \`${base}\`)\n\n\`\`\`bash\ngit fetch && git checkout ${branch}\n\`\`\`\n\n작업 완료 후:\n\`\`\`bash\ngh pr create --base ${base}\n\`\`\``
+            });

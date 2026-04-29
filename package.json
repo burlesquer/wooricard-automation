@@ -8,7 +8,8 @@
     "start": "node wooricard-main.js",
     "test": "node wooricard-main.js --no-slack --dry-run",
     "daemon": "node daemon.js",
-    "daemon:now": "node daemon.js --run-now"
+    "daemon:now": "node daemon.js --run-now",
+    "prepare": "git config commit.template .gitmessage 2>/dev/null || true"
   },
   "dependencies": {
     "@slack/web-api": "^7.3.4",
