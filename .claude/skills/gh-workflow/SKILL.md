@@ -1,6 +1,6 @@
 ---
 name: gh-workflow
-description: 우리카드 자동화 프로젝트 GitHub 워크플로우 가이드. issue 발행, 브랜치 생성, 커밋 메시지 작성, dev/main PR 생성, release 관리 모든 단계에서 적용. "이슈 만들어", "PR 만들어", "release 해줘", "커밋 메시지 짜줘", "main 으로 머지", "dev 로 PR" 같은 GitHub 워크플로우 관련 요청이면 반드시 이 스킬을 사용할 것.
+description: 우리카드 자동화 프로젝트 GitHub 워크플로우 (.gitmessage / issue templates / PR templates / CODEOWNERS / release.yml) 를 강제하는 가이드. **반드시 이 스킬을 사용해야 하는 요청 키워드:** "커밋해줘" / "commit" / "커밋 메시지" / "이슈 만들어" / "issue 발행" / "버그 리포트" / "기능 요청" / "PR 만들어" / "PR 올려" / "dev 로 PR" / "main 머지" / "main 으로 PR" / "release" / "릴리즈" / "버전 올려" / "tag" / "워크플로우" / "푸시해줘" / "브랜치 만들어". 단순 코드 수정/리팩터/디버그 요청이라도 마지막에 commit/push 가 따라오면 이 스킬을 사용해 .gitmessage 형식 (Conventional Commits + Constraint/Rejected/Confidence/Scope-risk/Directive trailers) 을 강제할 것. dev 는 unprotected, main 은 CODEOWNERS @burlesquer 승인 필수, main push → 자동 release 트리거됨을 항상 인지.
 ---
 
 # GitHub Workflow Skill
