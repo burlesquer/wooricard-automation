@@ -26,9 +26,10 @@ console.error = (...args) => {
 const TZ = 'Asia/Seoul';
 const MAIN_SCRIPT = path.join(__dirname, 'wooricard-main.js');
 const HOURLY_SCHEDULE = process.env.DAEMON_HOURLY_SCHEDULE || '59 * * * *'; // every hour at :59
-const BRIEFING_SCHEDULE = process.env.DAEMON_BRIEFING_SCHEDULE || '0 9 * * *'; // 09:00 daily
+const BRIEFING_SCHEDULE = process.env.DAEMON_BRIEFING_SCHEDULE || '30 9 * * *'; // 09:30 daily (8:59 hourly 종료 후 28분 버퍼)
 const SHEET_CREATE_SCHEDULE = '20 0 1 * *'; // 00:20 on 1st of every month (넉넉한 버퍼)
 const BRIEFING_HOUR = 9;
+const BRIEFING_MINUTE = 30;
 
 const config = require('./config.json');
 const XLSX_CONFIG = config.xlsx || { path: './복리후생비.xlsx' };
@@ -71,9 +72,15 @@ function markBriefingDone(ymd) {
 }
 
 // Briefing 수행 + marker write — primary cron, watchdog, startup 셋 다 호출.
+// marker 검사로 idempotent 보장 (startup 이 9:15에 발화 후 9:30 cron 중복 발화 방지).
 async function runBriefing() {
+  const today = todayKstYmd();
+  if (isBriefingDone(today)) {
+    console.log(`[${nowKst()}] ✓ briefing ${today} 이미 완료, skip`);
+    return;
+  }
   await withMutex(async () => {
-    const today = todayKstYmd();
+    if (isBriefingDone(today)) return; // mutex 대기 중에 다른 entry 가 처리했을 가능성
     const { day } = kstParts();
     if (day === 1) await spawnMain({ mode: 'monthly-capture' });
     await spawnMain({ mode: 'briefing' });
@@ -130,8 +137,9 @@ async function withMutex(fn, { queue = false, maxWaitMs = 10 * 60 * 1000 } = {})
 console.log('========================================');
 console.log('  우리카드 자동화 데몬');
 console.log('========================================');
-console.log(`Hourly schedule:  ${HOURLY_SCHEDULE}  (skips ${BRIEFING_HOUR}시대)`);
-console.log(`Briefing:         ${BRIEFING_SCHEDULE}  (→ daily, 1st also triggers monthly-capture)`);
+console.log(`Hourly schedule:  ${HOURLY_SCHEDULE}  (skips ${BRIEFING_HOUR}시대 + 1일 0시대)`);
+console.log(`Briefing:         ${BRIEFING_SCHEDULE}  (09:30 daily, 1st also triggers monthly-capture)`);
+console.log(`Briefing watchdog: 35 9 * * *  (09:35 catch-up if marker missing)`);
 console.log(`Sheet create:     ${SHEET_CREATE_SCHEDULE}  (새 월 xlsx 시트)`);
 console.log(`Timezone:         ${TZ}`);
 console.log(`Concurrency:      mutex — overlapping ticks are skipped`);
@@ -150,17 +158,13 @@ function scheduleWithCatchup(pattern, taskFn, label) {
 }
 
 // Hourly tick — skips:
-//   - 9시대 (briefing cron 담당)
-//   - 8시대 (briefing 시각 침범 방지: 8:59 hourly가 9:01까지 spill하면 9:00 briefing 충돌)
+//   - 9시대 (9:30 briefing 이 같은 시간 데이터를 수집하므로 9:59 hourly 는 redundant)
 //   - 1일 0시대 (sheet-create cron 담당)
+// 8시대 (8:59) 는 정상 진행 — briefing 09:30 까지 28분 버퍼 있어 spill 위험 없음.
 scheduleWithCatchup(HOURLY_SCHEDULE, async () => {
   const { hour, day } = kstParts();
   if (hour === BRIEFING_HOUR) {
     console.log(`[${nowKst()}] ⏭️  ${BRIEFING_HOUR}시대 — briefing cron 이 담당, skip`);
-    return;
-  }
-  if (hour === BRIEFING_HOUR - 1) {
-    console.log(`[${nowKst()}] ⏭️  ${BRIEFING_HOUR - 1}시대 — briefing 충돌 방지, skip`);
     return;
   }
   if (day === 1 && hour === 0) {
@@ -176,9 +180,9 @@ scheduleWithCatchup(BRIEFING_SCHEDULE, async () => {
   await runBriefing();
 }, 'briefing');
 
-// Watchdog at 09:05 — node-cron daily cron 이 어떤 이유로든 fire 안 됐을 때 catch-up.
-// marker 파일 있으면 skip (이미 09:00 cron 또는 startup이 처리).
-scheduleWithCatchup('5 9 * * *', async () => {
+// Watchdog at 09:35 — node-cron daily cron 이 어떤 이유로든 fire 안 됐을 때 catch-up.
+// runBriefing() 내부에서 marker 검사하므로 여기서는 단순 호출만.
+scheduleWithCatchup('35 9 * * *', async () => {
   const today = todayKstYmd();
   if (isBriefingDone(today)) {
     console.log(`[${nowKst()}] ✓ briefing-watchdog: ${today} 이미 완료, skip`);
@@ -207,15 +211,19 @@ scheduleWithCatchup(SHEET_CREATE_SCHEDULE, async () => {
   }, { queue: true });
 }, 'sheet-create');
 
-// Startup catch-up — daemon restart 시 오늘 09:00 이후이고 briefing marker 없으면 즉시 trigger.
+// Startup catch-up — daemon restart 시 오늘 briefing 시각(09:30) 이후이고 marker 없으면 즉시 trigger.
 // 이게 있어야 4/28 22:59 missed-event 같은 사고로 daily cron 망가져도 다음 daemon 재시작에서 복구됨.
+// runBriefing() 이 idempotent 하므로 9:30 cron 이 곧이어 fire 해도 중복 발화 없음.
 (async function startupBriefingCheck() {
-  const { hour } = kstParts();
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
+  const pastBriefingTime =
+    now.getHours() > BRIEFING_HOUR ||
+    (now.getHours() === BRIEFING_HOUR && now.getMinutes() >= BRIEFING_MINUTE);
   const today = todayKstYmd();
-  if (hour >= BRIEFING_HOUR && !isBriefingDone(today)) {
+  if (pastBriefingTime && !isBriefingDone(today)) {
     console.log(`[${nowKst()}] 🚀 startup catch-up: briefing ${today} 미완료 — 즉시 실행`);
     await runBriefing();
-  } else if (hour >= BRIEFING_HOUR) {
+  } else if (pastBriefingTime) {
     console.log(`[${nowKst()}] ✓ startup: briefing ${today} 이미 완료`);
   }
 })();
