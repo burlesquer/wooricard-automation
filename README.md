@@ -236,6 +236,81 @@ Subject: [우리카드 법인] 박성준 04.17 능이감자탕 40,000원
 | 로그에 `Previous run still in progress — skipping` | hourly tick 이 길어져 다른 cron 충돌. 8시대 skip + queue 로 이미 방어됨 |
 | Daemon 죽었는데 자동 재시작 원함 | PM2: `pm2 start daemon.js --name wooricard && pm2 save && pm2-startup install` |
 
+## GitHub 워크플로우 / 기여 가이드
+
+7-step 워크플로우로 모든 변경 관리. 자세한 가이드: [CONTRIBUTING.md](./CONTRIBUTING.md)
+
+### 흐름 한눈에
+
+```
+1. Issue 발행            (.github/ISSUE_TEMPLATE/{bug,feature,chore})
+   ↓
+2. Auto-branch 생성       (.github/workflows/auto-branch-from-issue.yml 가
+                          feat/<#>-<slug> 브랜치 자동 생성 + dev 에서 분기)
+   ↓
+3. 작업 + 커밋            (.gitmessage 템플릿 자동 활성, npm install 시 등록)
+   ↓
+4. dev 브랜치로 PR        (unprotected, light review, self-merge OK)
+   ↓
+5. main 브랜치로 PR       (release-grade, ?template=main.md 사용)
+   ↓
+6. CODEOWNERS 승인        (@burlesquer 만 가능, main 보호 규칙 강제)
+   ↓
+7. Auto-release          (.github/workflows/release.yml 가 main push 마다
+                          v<YYYY.MM.DD>-<NNN> tag + GitHub Release 자동 생성)
+```
+
+### 처음 셋업 (1회만)
+
+```bash
+npm install                                      # commit.template 자동 활성 (prepare script)
+git fetch && git checkout dev                    # 작업 시작점
+```
+
+main 보호 규칙 + dev 브랜치는 이미 적용됨 (`scripts/setup-branch-protection.sh` 참조).
+
+### Claude Code 사용
+
+이 프로젝트는 `.claude/skills/gh-workflow/` 하네스를 포함합니다. Claude 세션에서 다음 키워드로 자동 트리거:
+
+| 한 마디 | 동작 |
+|---------|------|
+| "커밋해줘" / "commit" | `.gitmessage` 형식대로 메시지 작성 (Conventional Commits + trailers) |
+| "이슈 만들어 [버그/기능/잡일]" | `.github/ISSUE_TEMPLATE` 채워서 `gh issue create` |
+| "PR 만들어" | dev 대상 PR (light template) |
+| "main 으로 PR" | dev → main release-grade PR (`?template=main.md`) |
+| "릴리즈" / "버전 올려" | release 자동화 안내 |
+
+**스킬 위치:**
+- `.claude/skills/gh-workflow/SKILL.md` — 디스패치
+- `.claude/skills/gh-workflow/references/{issue,commit,pr,release}-format.md` — 단계별 상세
+- `.claude/agents/gh-workflow-helper.md` — opus 에이전트
+
+**프로젝트 루트 [CLAUDE.md](./CLAUDE.md)** 가 새 세션마다 하네스 포인터를 자동 로드하므로, 별도 설정 없이 워크플로우가 강제됩니다.
+
+### 커밋 메시지 형식
+
+```
+<type>(<scope>): <subject>
+
+<body — WHY 중심>
+
+Closes #<issue>
+Constraint: <이 결정을 강제한 제약>
+Rejected: <대안> | <기각 이유>
+Confidence: high | medium | low
+Scope-risk: narrow | moderate | broad
+```
+
+Type: `feat | fix | refactor | chore | docs | test | perf | ci`
+
+### 브랜치 보호
+
+| Branch | Protected | PR 필수 | Code Owner Review | Force Push |
+|--------|-----------|---------|-------------------|------------|
+| main   | ✅        | ✅      | ✅ @burlesquer    | ❌         |
+| dev    | ❌        | ❌      | ❌                | ✅         |
+
 ## License
 
 Private project.
