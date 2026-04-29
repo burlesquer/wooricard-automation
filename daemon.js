@@ -69,6 +69,29 @@ function markBriefingDone(ymd) {
     fs.mkdirSync(BRIEFING_MARKER_DIR, { recursive: true });
     fs.writeFileSync(briefingMarkerPath(ymd), new Date().toISOString());
   } catch (e) { console.error(`[${nowKst()}] briefing marker write failed:`, e.message); }
+  cleanupOldMarkers();
+}
+
+// Marker retention — 30일 초과 marker 파일 삭제. write 직후 호출되므로 daily 1회 실행.
+const MARKER_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+function cleanupOldMarkers() {
+  try {
+    const cutoff = Date.now() - MARKER_RETENTION_MS;
+    const entries = fs.readdirSync(BRIEFING_MARKER_DIR);
+    let removed = 0;
+    for (const name of entries) {
+      if (!name.endsWith('.done')) continue;
+      const full = path.join(BRIEFING_MARKER_DIR, name);
+      try {
+        const stat = fs.statSync(full);
+        if (stat.mtimeMs < cutoff) {
+          fs.unlinkSync(full);
+          removed += 1;
+        }
+      } catch (_) {}
+    }
+    if (removed > 0) console.log(`[${nowKst()}] 🧹 marker cleanup: removed ${removed} file(s) older than 30d`);
+  } catch (e) { console.error(`[${nowKst()}] marker cleanup failed:`, e.message); }
 }
 
 // Briefing 수행 + marker write — primary cron, watchdog, startup 셋 다 호출.
