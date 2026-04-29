@@ -50,6 +50,37 @@ function kstParts() {
   return { hour: parseInt(hour, 10), day };
 }
 
+// Briefing marker — node-cron daily cron 이 missed/dropped 되어도 watchdog 또는
+// process startup 시 catch-up 가능하도록 하루 1회 정상 발화 여부를 file 로 기록.
+const BRIEFING_MARKER_DIR = path.join(__dirname, 'state', 'briefing');
+function todayKstYmd() {
+  const d = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
+  return `${d.getFullYear()}-${('0' + (d.getMonth() + 1)).slice(-2)}-${('0' + d.getDate()).slice(-2)}`;
+}
+function briefingMarkerPath(ymd) {
+  return path.join(BRIEFING_MARKER_DIR, `${ymd}.done`);
+}
+function isBriefingDone(ymd) {
+  try { return fs.existsSync(briefingMarkerPath(ymd)); } catch (_) { return false; }
+}
+function markBriefingDone(ymd) {
+  try {
+    fs.mkdirSync(BRIEFING_MARKER_DIR, { recursive: true });
+    fs.writeFileSync(briefingMarkerPath(ymd), new Date().toISOString());
+  } catch (e) { console.error(`[${nowKst()}] briefing marker write failed:`, e.message); }
+}
+
+// Briefing 수행 + marker write — primary cron, watchdog, startup 셋 다 호출.
+async function runBriefing() {
+  await withMutex(async () => {
+    const today = todayKstYmd();
+    const { day } = kstParts();
+    if (day === 1) await spawnMain({ mode: 'monthly-capture' });
+    await spawnMain({ mode: 'briefing' });
+    markBriefingDone(today);
+  }, { queue: true });
+}
+
 let running = false;
 
 function spawnMain({ mode }) {
@@ -140,16 +171,22 @@ scheduleWithCatchup(HOURLY_SCHEDULE, async () => {
 }, 'hourly');
 
 // Daily briefing at 09:00 — on 1st of month, also runs monthly-capture first.
-// queue:true → 만일 다른 tick이 mutex 잡고 있어도 끝날 때까지 대기 후 발화.
+// runBriefing() = mutex + monthly-capture + briefing + marker write.
 scheduleWithCatchup(BRIEFING_SCHEDULE, async () => {
-  await withMutex(async () => {
-    const { day } = kstParts();
-    if (day === 1) {
-      await spawnMain({ mode: 'monthly-capture' });
-    }
-    await spawnMain({ mode: 'briefing' });
-  }, { queue: true });
+  await runBriefing();
 }, 'briefing');
+
+// Watchdog at 09:05 — node-cron daily cron 이 어떤 이유로든 fire 안 됐을 때 catch-up.
+// marker 파일 있으면 skip (이미 09:00 cron 또는 startup이 처리).
+scheduleWithCatchup('5 9 * * *', async () => {
+  const today = todayKstYmd();
+  if (isBriefingDone(today)) {
+    console.log(`[${nowKst()}] ✓ briefing-watchdog: ${today} 이미 완료, skip`);
+    return;
+  }
+  console.log(`[${nowKst()}] ⚠️  briefing-watchdog: ${today} 미완료 — catch-up 실행`);
+  await runBriefing();
+}, 'briefing-watchdog');
 
 // Monthly xlsx sheet creation at 00:20 on 1st
 // 00:20 = 23:59 hourly (~3분) 종료 후 18분 버퍼. 충돌 거의 불가능.
@@ -169,6 +206,19 @@ scheduleWithCatchup(SHEET_CREATE_SCHEDULE, async () => {
     }
   }, { queue: true });
 }, 'sheet-create');
+
+// Startup catch-up — daemon restart 시 오늘 09:00 이후이고 briefing marker 없으면 즉시 trigger.
+// 이게 있어야 4/28 22:59 missed-event 같은 사고로 daily cron 망가져도 다음 daemon 재시작에서 복구됨.
+(async function startupBriefingCheck() {
+  const { hour } = kstParts();
+  const today = todayKstYmd();
+  if (hour >= BRIEFING_HOUR && !isBriefingDone(today)) {
+    console.log(`[${nowKst()}] 🚀 startup catch-up: briefing ${today} 미완료 — 즉시 실행`);
+    await runBriefing();
+  } else if (hour >= BRIEFING_HOUR) {
+    console.log(`[${nowKst()}] ✓ startup: briefing ${today} 이미 완료`);
+  }
+})();
 
 if (process.argv.includes('--run-now')) {
   console.log('[--run-now] Triggering hourly immediately for smoke test...');
