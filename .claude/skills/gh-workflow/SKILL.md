@@ -45,3 +45,5 @@ description: 우리카드 자동화 프로젝트 GitHub 워크플로우 (.gitmes
 | 날짜 | 변경 | 사유 |
 |------|------|------|
 | 2026-04-29 | 초기 구성 | 7-step GitHub 워크플로우 자동화 |
+| 2026-04-30 | step 8 (Slack release notify) 추가 — `references/notify-format.md` + `scripts/notify-release.js` | release 직후 다중 사용자에게 변경 내역 일괄 통보 절차를 ad-hoc 인라인 호출에서 재사용 가능 형태로 공식화 |
+| 2026-04-30 | step 8 (Slack release notify) 추가 — `references/notify-format.md` + `scripts/notify-release.js` | release 직후 다중 사용자에게 변경 내역 일괄 통보 절차를 ad-hoc 에서 재사용 가능 형태로 공식화 |
