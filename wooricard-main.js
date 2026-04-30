@@ -316,14 +316,21 @@ async function main() {
       if (!r.account.slackId || r.error) continue;
 
       if (CLI_BRIEFING) {
-        // Daily morning briefing — send regardless of amountChanged
+        // Daily morning briefing — send budget summary regardless of amountChanged
         if (r.availableAmount !== undefined) {
           const dm = buildBriefingDM(r, dateRange);
           await slackClient.send(dm, r.account.slackId);
           console.error(`Briefing DM sent to ${r.account.name}`);
         }
-      } else if (r.amountChanged && r.totalAmount > 0) {
-        // Change-triggered DM (manual / on-demand runs)
+      }
+      // Per-transaction DM:
+      //   - hourly: amount changed since last save
+      //   - briefing: newItems present (9시대 hourly 가 briefing 으로 위임되므로 briefing 도 개별 알림 책임을 겸한다 — Gmail loop 와 동일 조건)
+      const hasNewItems = r.newItems && r.newItems.length > 0;
+      const shouldSendPersonal = CLI_BRIEFING
+        ? hasNewItems
+        : (r.amountChanged && r.totalAmount > 0);
+      if (shouldSendPersonal) {
         const dm = buildPersonalDM(r, dateRange, r.remainingBalance ?? null);
         await slackClient.send(dm, r.account.slackId);
         console.error(`Personal DM sent to ${r.account.name} (remaining: ${r.remainingBalance?.toLocaleString() ?? 'N/A'}원)`);
