@@ -23,6 +23,7 @@
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |------|----------|------|------|
 | 2026-04-29 | 초기 구성 | 전체 (.github/, .claude/skills/gh-workflow/, .claude/agents/, CONTRIBUTING.md, scripts/setup-branch-protection.sh) | 7-step GitHub 워크플로우 자동화 |
+| 2026-04-30 | step 8 (Slack release notify) 추가 | .claude/skills/gh-workflow/{references/notify-format.md, scripts/notify-release.js, SKILL.md} | release 직후 변경 내역을 다중 사용자에게 일괄 DM 공지하는 절차를 공식화 (ad-hoc 인라인 호출 → 재사용 스크립트) |
 
 ---
 
