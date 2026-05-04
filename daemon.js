@@ -51,37 +51,58 @@ function kstParts() {
   return { hour: parseInt(hour, 10), day };
 }
 
-// Briefing marker — node-cron daily cron 이 missed/dropped 되어도 watchdog 또는
-// process startup 시 catch-up 가능하도록 하루 1회 정상 발화 여부를 file 로 기록.
+// Briefing/Capture marker — node-cron daily/monthly cron 이 missed/dropped 되어도
+// watchdog 또는 process startup 시 catch-up 가능하도록 정상 발화 여부를 file 로 기록.
+// briefing: state/briefing/YYYY-MM-DD.done (daily)
+// capture:  state/capture/YYYY-MM.done    (monthly)
 const BRIEFING_MARKER_DIR = path.join(__dirname, 'state', 'briefing');
+const CAPTURE_MARKER_DIR = path.join(__dirname, 'state', 'capture');
 function todayKstYmd() {
   const d = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
   return `${d.getFullYear()}-${('0' + (d.getMonth() + 1)).slice(-2)}-${('0' + d.getDate()).slice(-2)}`;
 }
+function todayKstYm() {
+  const d = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
+  return `${d.getFullYear()}-${('0' + (d.getMonth() + 1)).slice(-2)}`;
+}
 function briefingMarkerPath(ymd) {
   return path.join(BRIEFING_MARKER_DIR, `${ymd}.done`);
 }
+function captureMarkerPath(ym) {
+  return path.join(CAPTURE_MARKER_DIR, `${ym}.done`);
+}
 function isBriefingDone(ymd) {
   try { return fs.existsSync(briefingMarkerPath(ymd)); } catch (_) { return false; }
+}
+function isCaptureDone(ym) {
+  try { return fs.existsSync(captureMarkerPath(ym)); } catch (_) { return false; }
 }
 function markBriefingDone(ymd) {
   try {
     fs.mkdirSync(BRIEFING_MARKER_DIR, { recursive: true });
     fs.writeFileSync(briefingMarkerPath(ymd), new Date().toISOString());
   } catch (e) { console.error(`[${nowKst()}] briefing marker write failed:`, e.message); }
-  cleanupOldMarkers();
+  cleanupOldMarkers(BRIEFING_MARKER_DIR);
+}
+function markCaptureDone(ym) {
+  try {
+    fs.mkdirSync(CAPTURE_MARKER_DIR, { recursive: true });
+    fs.writeFileSync(captureMarkerPath(ym), new Date().toISOString());
+  } catch (e) { console.error(`[${nowKst()}] capture marker write failed:`, e.message); }
+  cleanupOldMarkers(CAPTURE_MARKER_DIR);
 }
 
 // Marker retention — 30일 초과 marker 파일 삭제. write 직후 호출되므로 daily 1회 실행.
+// dir 인자로 briefing/capture 어느 디렉터리든 정리 가능.
 const MARKER_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-function cleanupOldMarkers() {
+function cleanupOldMarkers(dir = BRIEFING_MARKER_DIR) {
   try {
     const cutoff = Date.now() - MARKER_RETENTION_MS;
-    const entries = fs.readdirSync(BRIEFING_MARKER_DIR);
+    const entries = fs.readdirSync(dir);
     let removed = 0;
     for (const name of entries) {
       if (!name.endsWith('.done')) continue;
-      const full = path.join(BRIEFING_MARKER_DIR, name);
+      const full = path.join(dir, name);
       try {
         const stat = fs.statSync(full);
         if (stat.mtimeMs < cutoff) {
@@ -90,8 +111,8 @@ function cleanupOldMarkers() {
         }
       } catch (_) {}
     }
-    if (removed > 0) console.log(`[${nowKst()}] 🧹 marker cleanup: removed ${removed} file(s) older than 30d`);
-  } catch (e) { console.error(`[${nowKst()}] marker cleanup failed:`, e.message); }
+    if (removed > 0) console.log(`[${nowKst()}] 🧹 marker cleanup (${path.basename(dir)}): removed ${removed} file(s) older than 30d`);
+  } catch (e) { console.error(`[${nowKst()}] marker cleanup failed (${path.basename(dir)}):`, e.message); }
 }
 
 // Briefing 수행 + marker write — primary cron, watchdog, startup 셋 다 호출.
@@ -104,10 +125,23 @@ async function runBriefing() {
   }
   await withMutex(async () => {
     if (isBriefingDone(today)) return; // mutex 대기 중에 다른 entry 가 처리했을 가능성
-    const { day } = kstParts();
-    if (day === 1) await spawnMain({ mode: 'monthly-capture' });
     await spawnMain({ mode: 'briefing' });
     markBriefingDone(today);
+  }, { queue: true });
+}
+
+// Monthly capture 수행 + marker write — primary cron, startup catch-up 둘 다 호출.
+// marker 검사로 idempotent (월 1회만 발화). briefing path 와 독립 — briefing 실패해도 capture 영향 없음.
+async function runMonthlyCapture() {
+  const ym = todayKstYm();
+  if (isCaptureDone(ym)) {
+    console.log(`[${nowKst()}] ✓ monthly-capture ${ym} 이미 완료, skip`);
+    return;
+  }
+  await withMutex(async () => {
+    if (isCaptureDone(ym)) return; // mutex 대기 중 다른 entry 가 처리했을 가능성
+    await spawnMain({ mode: 'monthly-capture' });
+    markCaptureDone(ym);
   }, { queue: true });
 }
 
@@ -161,8 +195,9 @@ console.log('========================================');
 console.log('  우리카드 자동화 데몬');
 console.log('========================================');
 console.log(`Hourly schedule:  ${HOURLY_SCHEDULE}  (skips ${BRIEFING_HOUR}시대 + 1일 0시대)`);
-console.log(`Briefing:         ${BRIEFING_SCHEDULE}  (09:30 daily, 1st also triggers monthly-capture)`);
+console.log(`Briefing:         ${BRIEFING_SCHEDULE}  (09:30 daily)`);
 console.log(`Briefing watchdog: 35 9 * * *  (09:35 catch-up if marker missing)`);
+console.log(`Monthly capture:  30 9 1 * *  (09:30 on 1st, independent cron)`);
 console.log(`Sheet create:     ${SHEET_CREATE_SCHEDULE}  (새 월 xlsx 시트)`);
 console.log(`Timezone:         ${TZ}`);
 console.log(`Concurrency:      mutex — overlapping ticks are skipped`);
@@ -215,6 +250,13 @@ scheduleWithCatchup('35 9 * * *', async () => {
   await runBriefing();
 }, 'briefing-watchdog');
 
+// Monthly capture at 09:30 on 1st — briefing 과 같은 시간이지만 독립 cron entry.
+// briefing path 가 어떤 이유로든 실패해도 capture 는 자체 cron + marker + startup catch-up 으로 복구.
+// runMonthlyCapture() 내부에서 marker 검사 → idempotent.
+scheduleWithCatchup('30 9 1 * *', async () => {
+  await runMonthlyCapture();
+}, 'monthly-capture');
+
 // Monthly xlsx sheet creation at 00:20 on 1st
 // 00:20 = 23:59 hourly (~3분) 종료 후 18분 버퍼. 충돌 거의 불가능.
 // queue:true 는 만일에 대비한 안전망 (정상 케이스에서는 mutex 비어있음).
@@ -248,6 +290,25 @@ scheduleWithCatchup(SHEET_CREATE_SCHEDULE, async () => {
     await runBriefing();
   } else if (pastBriefingTime) {
     console.log(`[${nowKst()}] ✓ startup: briefing ${today} 이미 완료`);
+  }
+})();
+
+// Startup catch-up (capture) — daemon restart 시 이번 달 capture marker 없고 1일 09:30 이후면 즉시 trigger.
+// briefing 과 동일 패턴: idempotent marker 검사로 cron 중복 발화 안전.
+// 이게 있어야 5/1 09:30 cron miss + daemon restart 같은 사고에도 capture 복구 가능.
+(async function startupCaptureCheck() {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
+  const day = now.getDate();
+  const pastCaptureTime =
+    day > 1 ||
+    (day === 1 && (now.getHours() > BRIEFING_HOUR ||
+      (now.getHours() === BRIEFING_HOUR && now.getMinutes() >= BRIEFING_MINUTE)));
+  const ym = todayKstYm();
+  if (pastCaptureTime && !isCaptureDone(ym)) {
+    console.log(`[${nowKst()}] 🚀 startup catch-up: monthly-capture ${ym} 미완료 — 즉시 실행`);
+    await runMonthlyCapture();
+  } else if (pastCaptureTime) {
+    console.log(`[${nowKst()}] ✓ startup: monthly-capture ${ym} 이미 완료`);
   }
 })();
 
