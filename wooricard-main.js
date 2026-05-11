@@ -155,9 +155,18 @@ async function main() {
 
   const transkey = createTransKey(session);
   const login = createLoginFlow(session, transkey, { loginUrl: LOGIN_URL });
+
+  // Lock target month at process start to prevent midnight-boundary race (#15).
+  // 23:59 cron 처리 중 자정을 넘기는 account 의 fetch 에서 history.resolveDates() 가
+  // 새 currentMonth(='다음 달') 를 계산 → 빈 응답 → 현재 달 archive overwrite 되는 사고 차단.
+  // CLI_MONTH (수동 재수집 등) 가 있으면 그걸 우선.
+  const lockedMonth = (() => {
+    const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+    return ('0' + (d.getMonth() + 1)).slice(-2);
+  })();
   const history = createHistoryFetcher(session, login, {
     historyUrl: HISTORY_URL,
-    cliMonth: CLI_MONTH,
+    cliMonth: CLI_MONTH || lockedMonth,
   });
 
   const results = [];
