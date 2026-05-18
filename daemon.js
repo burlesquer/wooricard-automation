@@ -197,6 +197,7 @@ console.log('========================================');
 console.log(`Hourly schedule:  ${HOURLY_SCHEDULE}  (skips ${BRIEFING_HOUR}시대 + 1일 0시대)`);
 console.log(`Briefing:         ${BRIEFING_SCHEDULE}  (09:30 daily)`);
 console.log(`Briefing watchdog: 35 9 * * *  (09:35 catch-up if marker missing)`);
+console.log(`Wall-clock watcher: */5 * * * *  (long-delay cron 누락 대비 이중 안전망)`);
 console.log(`Monthly capture:  30 9 1 * *  (09:30 on 1st, independent cron)`);
 console.log(`Sheet create:     ${SHEET_CREATE_SCHEDULE}  (새 월 xlsx 시트)`);
 console.log(`Timezone:         ${TZ}`);
@@ -275,6 +276,29 @@ scheduleWithCatchup(SHEET_CREATE_SCHEDULE, async () => {
     }
   }, { queue: true });
 }, 'sheet-create');
+
+// Wall-clock watcher — node-cron 의 long-delay daily/monthly cron 이 silently 누락돼도
+// 5분 간격 short-delay cron 으로 marker 검사 → catch-up. 기존 briefing/watchdog/monthly-capture
+// cron 과 이중 안전망 구성. runBriefing/runMonthlyCapture 가 marker idempotent 하므로
+// 기존 cron 이 정상 fire 해도 중복 발화 없음.
+// 배경: node-cron 4.x 가 24h~1mo long-delay timer 를 가끔 silent drop — daemon process 와
+// hourly cron 은 살아있는데 briefing/watchdog 만 누락되는 패턴 (daemon.log 5-11, 5-12 참조).
+scheduleWithCatchup('*/5 * * * *', async () => {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
+  const pastBriefingTime =
+    now.getHours() > BRIEFING_HOUR ||
+    (now.getHours() === BRIEFING_HOUR && now.getMinutes() >= BRIEFING_MINUTE);
+  const today = todayKstYmd();
+  const ym = todayKstYm();
+  if (pastBriefingTime && !isBriefingDone(today)) {
+    console.log(`[${nowKst()}] 🔁 watcher: briefing ${today} 미완료 — catch-up 실행`);
+    await runBriefing();
+  }
+  if (now.getDate() === 1 && pastBriefingTime && !isCaptureDone(ym)) {
+    console.log(`[${nowKst()}] 🔁 watcher: monthly-capture ${ym} 미완료 — catch-up 실행`);
+    await runMonthlyCapture();
+  }
+}, 'watcher');
 
 // Startup catch-up — daemon restart 시 오늘 briefing 시각(09:30) 이후이고 marker 없으면 즉시 trigger.
 // 이게 있어야 4/28 22:59 missed-event 같은 사고로 daily cron 망가져도 다음 daemon 재시작에서 복구됨.

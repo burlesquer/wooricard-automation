@@ -1,6 +1,7 @@
 node_modules/
 config.json
 state/
+state-test/
 captures/
 *.log
 복리후생비.xlsx
